@@ -11,3 +11,12 @@ alterations to work with other devices.
 : tzsp2pcap -o "file.pcap" -C 1000000 # rotate file every 1MB (file.pcap.1, file.pcap.2, etc)
 : tzsp2pcap -o "file_%s.pcap" -G 10 # create new file every 10 seconds (file_UNIXTIMESTAMP.pcap)
 : tzsp2pcap -o "file.pcap" -C 1000000 -z gzip # rotate file every 1MB and gzip it (file.pcap.1.gz, file.pcap.2.gz, etc)
+
+* Docker build test
+Build each Linux architecture separately:
+#+begin_src sh
+docker buildx build --platform linux/amd64 --load -t tzsp2pcap:build-test-amd64 .
+docker buildx build --platform linux/arm64 --load -t tzsp2pcap:build-test-arm64 .
+#+end_src
+Both builds run =make=. Only arm64 executes =./tzsp2pcap -h= and checks
+for =-R BYTES     Request UDP socket receive buffer via SO_RCVBUF=.
