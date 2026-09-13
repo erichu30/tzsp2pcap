@@ -53,7 +53,9 @@ jobs:
         run: |
           cd dist
           sha256sum tzsp2pcap-linux-amd64 tzsp2pcap-linux-arm64 > checksums.txt
-          if ! gh release view "$TAG" > /dev/null 2>&1; then
-            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists and is immutable; use a new tag." >&2
+            exit 1
           fi
-          gh release upload "$TAG" tzsp2pcap-linux-amd64 tzsp2pcap-linux-arm64 checksums.txt --clobber
+          gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes \
+            tzsp2pcap-linux-amd64 tzsp2pcap-linux-arm64 checksums.txt
