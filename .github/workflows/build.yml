@@ -1,0 +1,59 @@
+name: Nix build and release
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and package with Nix in Docker
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: sh scripts/build-release.sh "$ARCH"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tzsp2pcap-linux-${{ matrix.arch }}
+          path: dist/tzsp2pcap-linux-${{ matrix.arch }}
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tzsp2pcap-linux-*
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd dist
+          sha256sum tzsp2pcap-linux-amd64 tzsp2pcap-linux-arm64 > checksums.txt
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          fi
+          gh release upload "$TAG" tzsp2pcap-linux-amd64 tzsp2pcap-linux-arm64 checksums.txt --clobber
