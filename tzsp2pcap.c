@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
+#include <limits.h>
 #include <errno.h>
 #include <signal.h>
 #include <string.h>
@@ -98,13 +99,43 @@ static void request_terminate_handler(int signum) {
 	}
 }
 
-static int setup_tzsp_listener(uint16_t listen_port) {
+static int setup_tzsp_listener(uint16_t listen_port,
+                               int socket_receive_buffer_size,
+                               int verbose) {
 	int result;
 
 	int sockfd = socket(PF_INET6, SOCK_DGRAM, IPPROTO_UDP);
 	if (sockfd == -1) {
 		perror("socket()");
 		goto err_exit;
+	}
+
+	if (socket_receive_buffer_size > 0) {
+		result = setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF,
+		                    (void*)&socket_receive_buffer_size,
+		                    sizeof(socket_receive_buffer_size));
+		if (result == -1) {
+			perror("setsockopt(SO_RCVBUF)");
+			goto err_close;
+		}
+
+		int effective_receive_buffer_size = 0;
+		socklen_t effective_receive_buffer_size_len =
+		    sizeof(effective_receive_buffer_size);
+		result = getsockopt(sockfd, SOL_SOCKET, SO_RCVBUF,
+		                    (void*)&effective_receive_buffer_size,
+		                    &effective_receive_buffer_size_len);
+		if (result == -1) {
+			perror("getsockopt(SO_RCVBUF)");
+			goto err_close;
+		}
+
+		if (verbose >= 1) {
+			fprintf(stderr,
+			        "UDP socket receive buffer: requested=%d effective=%d\n",
+			        socket_receive_buffer_size,
+			        effective_receive_buffer_size);
+		}
 	}
 
 	int on = 0;
@@ -354,13 +385,14 @@ static void usage(const char *program) {
 	        "tzsp2pcap: receive tazmen sniffer protocol over udp and\n"
 	        "produce pcap formatted output\n"
 	        "\n"
-	        "Usage %s [-h] [-v] [-f] [-p PORT] [-o FILENAME] [-s SIZE] [-G SECONDS] [-C SIZE] [-z CMD]\n"
+	        "Usage %s [-h] [-v] [-f] [-p PORT] [-o FILENAME] [-s SIZE] [-R BYTES] [-G SECONDS] [-C SIZE] [-z CMD]\n"
 	        "\t-h           Display this message\n"
 	        "\t-v           Verbose (repeat to increase up to -vv)\n"
 	        "\t-f           Flush output after every packet\n"
 	        "\t-p PORT      Specify port to listen on  (defaults to %u)\n"
 	        "\t-o FILENAME  Write output to FILENAME   (defaults to stdout)\n"
 	        "\t-s SIZE      Receive buffer size        (defaults to %u)\n"
+	        "\t-R BYTES     Request UDP socket receive buffer via SO_RCVBUF\n"
 	        "\t-G SECONDS   Rotate file every n seconds\n"
 	        "\t-C FILESIZE  Rotate file when FILESIZE is reached\n"
 	        "\t-z CMD       Post-rotate command to execute\n",
@@ -373,6 +405,7 @@ int main(int argc, char **argv) {
 	int retval = 0;
 
 	int         recv_buffer_size  = DEFAULT_RECV_BUFFER_SIZE;
+	int         socket_receive_buffer_size = 0;
 	uint16_t    listen_port       = DEFAULT_LISTEN_PORT;
 
 	struct my_pcap_t my_pcap = {
@@ -392,7 +425,7 @@ int main(int argc, char **argv) {
 	char flush_every_packet = 0;
 
 	int ch;
-	while ((ch = getopt(argc, argv, "fp:o:s:C:G:z:vh")) != -1) {
+	while ((ch = getopt(argc, argv, "fp:o:s:R:C:G:z:vh")) != -1) {
 		switch (ch) {
 		case 'f':
 			flush_every_packet = 1;
@@ -412,6 +445,28 @@ int main(int argc, char **argv) {
 		case 's':
 			recv_buffer_size = atoi(optarg);
 			break;
+
+		case 'R': {
+			char *endptr = NULL;
+			long value;
+
+			errno = 0;
+			value = strtol(optarg, &endptr, 10);
+			if (errno != 0 ||
+			    endptr == optarg ||
+			    *endptr != '\0' ||
+			    value <= 0 ||
+			    value > INT_MAX)
+			{
+				fprintf(stderr,
+				        "Invalid -R socket receive buffer size: %s\n",
+				        optarg);
+				retval = -1;
+				goto exit;
+			}
+			socket_receive_buffer_size = (int)value;
+			break;
+		}
 
 		case 'v':
 			my_pcap.verbose++;
@@ -483,7 +538,9 @@ int main(int argc, char **argv) {
 		goto exit;
 	}
 
-	int tzsp_listener = setup_tzsp_listener(listen_port);
+	int tzsp_listener = setup_tzsp_listener(listen_port,
+	                                        socket_receive_buffer_size,
+	                                        my_pcap.verbose);
 	if (tzsp_listener == -1) {
 		fprintf(stderr, "Could not setup tzsp listener\n");
 		retval = errno;
