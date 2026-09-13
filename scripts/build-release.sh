@@ -12,6 +12,7 @@ output="dist/linux-$arch"
 mkdir -p "$output"
 docker buildx build --platform "linux/$arch" --target release \
     --output "type=local,dest=$output" .
-cp COPYING "$output/COPYING"
-tar -czf "dist/tzsp2pcap-linux-$arch.tar.gz" -C "$output" tzsp2pcap COPYING
-printf 'Built %s\n' "dist/tzsp2pcap-linux-$arch.tar.gz"
+binary="dist/tzsp2pcap-linux-$arch"
+cp "$output/tzsp2pcap" "$binary"
+chmod 755 "$binary"
+printf 'Built %s\n' "$binary"
